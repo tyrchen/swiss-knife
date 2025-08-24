@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
     );
     spinner.set_message("Analyzing video duration...");
     spinner.enable_steady_tick(Duration::from_millis(100));
-    
+
     let duration = get_video_duration(&args.video_file)?;
     spinner.finish_with_message(format!(
         "Video duration: {} seconds",
@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
     );
     spinner.set_message("Generating content with GPT-5-mini...");
     spinner.enable_steady_tick(Duration::from_millis(100));
-    
+
     let content = generate_content_from_transcript(&full_transcript).await?;
     spinner.finish_with_message(format!("{} Content generated successfully!", CHECK));
 
@@ -104,11 +104,7 @@ async fn main() -> Result<()> {
         SPARKLES,
         style("Processing complete!").green().bold()
     );
-    println!(
-        "{} All files saved in {}",
-        PACKAGE,
-        style("/tmp").yellow()
-    );
+    println!("{} All files saved in {}", PACKAGE, style("/tmp").yellow());
 
     Ok(())
 }
@@ -150,10 +146,7 @@ async fn process_short_video(
 
     // Check cache
     if transcript_file.exists() {
-        println!(
-            "{} Using cached transcript",
-            style("♻️").cyan()
-        );
+        println!("{} Using cached transcript", style("♻️").cyan());
         return fs::read_to_string(&transcript_file).context("Failed to read cached transcript");
     }
 
@@ -167,14 +160,11 @@ async fn process_short_video(
         );
         spinner.set_message("Extracting audio from video...");
         spinner.enable_steady_tick(Duration::from_millis(100));
-        
+
         extract_audio(video_path, &audio_file, None, None)?;
         spinner.finish_with_message(format!("{} Audio extracted", CHECK));
     } else {
-        println!(
-            "{} Using cached audio file",
-            style("♻️").cyan()
-        );
+        println!("{} Using cached audio file", style("♻️").cyan());
     }
 
     // Check file size and compress if needed
@@ -189,12 +179,12 @@ async fn process_short_video(
     );
     spinner.set_message("Transcribing audio with gpt-4o-transcribe...");
     spinner.enable_steady_tick(Duration::from_millis(100));
-    
+
     let client = OpenAIClient::new()?;
     let transcript = client
         .transcribe(audio_data, &format!("{}.mp3", video_name))
         .await?;
-    
+
     spinner.finish_with_message(format!("{} Audio transcribed", CHECK));
 
     Ok(transcript)
@@ -212,10 +202,7 @@ async fn process_long_video(
     );
 
     let num_chunks = duration.div_ceil(1300);
-    println!(
-        "   Will create {} chunks",
-        style(num_chunks).cyan().bold()
-    );
+    println!("   Will create {} chunks", style(num_chunks).cyan().bold());
     println!();
 
     let (tx, mut rx) = mpsc::channel(num_chunks as usize);
@@ -251,9 +238,17 @@ async fn process_long_video(
         let handle = task::spawn(async move {
             chunk_progress.set_message(format!("{}/{}: Starting...", i + 1, num_chunks));
             chunk_progress.enable_steady_tick(Duration::from_millis(100));
-            
-            let result =
-                process_chunk(&video_path, &video_name, i, duration, &tmp_dir, &client, &chunk_progress).await;
+
+            let result = process_chunk(
+                &video_path,
+                &video_name,
+                i,
+                duration,
+                &tmp_dir,
+                &client,
+                &chunk_progress,
+            )
+            .await;
 
             chunk_progress.finish_and_clear();
             tx.send((i, result)).await.unwrap();
@@ -532,12 +527,23 @@ fn save_outputs(video_name: &str, tmp_dir: &Path, content: &ContentResponse) -> 
     println!("{} {}:", style("Generated files").bold(), PACKAGE);
     println!(
         "  📝 Transcript: {}",
-        style(tmp_dir.join(format!("{}_transcript.txt", video_name)).display()).dim()
+        style(
+            tmp_dir
+                .join(format!("{}_transcript.txt", video_name))
+                .display()
+        )
+        .dim()
     );
     println!("  📋 Full content: {}", style(content_file.display()).dim());
     println!("  🏷️ Titles: {}", style(titles_file.display()).dim());
-    println!("  📄 Descriptions: {}", style(descriptions_file.display()).dim());
-    println!("  💬 Status updates: {}", style(status_file.display()).dim());
+    println!(
+        "  📄 Descriptions: {}",
+        style(descriptions_file.display()).dim()
+    );
+    println!(
+        "  💬 Status updates: {}",
+        style(status_file.display()).dim()
+    );
     println!();
 
     // Display preview of titles

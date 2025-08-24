@@ -2,6 +2,24 @@
 name = "swiss-knife"
 version = "0.1.0"
 edition = "2021"
+authors = ["Tyr Chen <tyr.chen@gmail.com>"]
+homepage = "https://github.com/tyrchen/swiss-knife"
+repository = "https://github.com/tyrchen/swiss-knife"
+description = "A collection of useful Rust CLI tools for various automation tasks"
+license = "MIT"
+readme = "README.md"
+keywords = ["cli", "utility", "tools", "automation", "video"]
+categories = ["command-line-utilities", "multimedia"]
+exclude = [
+  "specs/",
+  "scripts/",
+  "*.mp4",
+  "*.mp3",
+  "*.txt",
+  "target/",
+  ".git/",
+  ".gitignore",
+]
 
 [[bin]]
 name = "convert"
@@ -20,5 +38,16 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 clap = { version = "4", features = ["derive"] }
 rayon = "1.11"
-indicatif = "0.17"
-console = "0.15"
+indicatif = "0.18"
+console = "0.16"
+
+[profile.release]
+opt-level = "z"   # Optimize for size
+lto = true        # Enable Link Time Optimization
+codegen-units = 1 # Single codegen unit for better optimization
+strip = true      # Strip symbols from binary
+panic = "abort"   # Abort on panic instead of unwinding
+
+[profile.release-with-debug]
+inherits = "release"
+strip = false        # Keep symbols for debugging
