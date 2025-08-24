@@ -1,13 +1,22 @@
 use anyhow::{Context, Result};
 use clap::Parser;
+use console::{style, Emoji};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task;
 
 mod openai;
 use openai::{ContentResponse, OpenAIClient};
+
+static MOVIE: Emoji<'_, '_> = Emoji("🎬 ", "");
+static SPARKLES: Emoji<'_, '_> = Emoji("✨ ", "");
+static CHECK: Emoji<'_, '_> = Emoji("✅ ", "");
+static PACKAGE: Emoji<'_, '_> = Emoji("📦 ", "");
+static WARNING: Emoji<'_, '_> = Emoji("⚠️  ", "");
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -31,11 +40,28 @@ async fn main() -> Result<()> {
         .to_string_lossy()
         .to_string();
 
-    println!("🎬 Processing video: {:?}", args.video_file);
+    println!(
+        "{} {}",
+        MOVIE,
+        style(format!("Processing video: {:?}", args.video_file)).bold()
+    );
+    println!();
 
     // Get video duration
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    spinner.set_message("Analyzing video duration...");
+    spinner.enable_steady_tick(Duration::from_millis(100));
+    
     let duration = get_video_duration(&args.video_file)?;
-    println!("Video duration: {} seconds", duration);
+    spinner.finish_with_message(format!(
+        "Video duration: {} seconds",
+        style(duration).cyan()
+    ));
 
     let tmp_dir = PathBuf::from("/tmp");
     let transcript_file = tmp_dir.join(format!("{}_transcript.txt", video_name));
@@ -49,17 +75,40 @@ async fn main() -> Result<()> {
 
     // Save full transcript
     fs::write(&transcript_file, &full_transcript)?;
-    println!("✅ Transcript saved to: {:?}", transcript_file);
+    println!(
+        "{} Transcript saved to: {}",
+        CHECK,
+        style(transcript_file.display()).dim()
+    );
+    println!();
 
     // Generate content
-    println!("🤖 Generating content with GPT-5-mini...");
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    spinner.set_message("Generating content with GPT-5-mini...");
+    spinner.enable_steady_tick(Duration::from_millis(100));
+    
     let content = generate_content_from_transcript(&full_transcript).await?;
+    spinner.finish_with_message(format!("{} Content generated successfully!", CHECK));
 
     // Save all outputs
     save_outputs(&video_name, &tmp_dir, &content)?;
 
-    println!("🎉 Processing complete!");
-    println!("✨ All files saved in /tmp directory");
+    println!();
+    println!(
+        "{} {}",
+        SPARKLES,
+        style("Processing complete!").green().bold()
+    );
+    println!(
+        "{} All files saved in {}",
+        PACKAGE,
+        style("/tmp").yellow()
+    );
 
     Ok(())
 }
@@ -101,27 +150,52 @@ async fn process_short_video(
 
     // Check cache
     if transcript_file.exists() {
-        println!("Transcript already exists, using cached version...");
+        println!(
+            "{} Using cached transcript",
+            style("♻️").cyan()
+        );
         return fs::read_to_string(&transcript_file).context("Failed to read cached transcript");
     }
 
     // Extract audio if not exists
     if !audio_file.exists() {
-        println!("📢 Extracting audio...");
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.green} {msg}")
+                .unwrap(),
+        );
+        spinner.set_message("Extracting audio from video...");
+        spinner.enable_steady_tick(Duration::from_millis(100));
+        
         extract_audio(video_path, &audio_file, None, None)?;
+        spinner.finish_with_message(format!("{} Audio extracted", CHECK));
     } else {
-        println!("Audio file already exists, using cached version...");
+        println!(
+            "{} Using cached audio file",
+            style("♻️").cyan()
+        );
     }
 
     // Check file size and compress if needed
     let audio_data = compress_if_needed(&audio_file).await?;
 
     // Transcribe
-    println!("Calling OpenAI gpt-4o-transcribe API...");
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    spinner.set_message("Transcribing audio with gpt-4o-transcribe...");
+    spinner.enable_steady_tick(Duration::from_millis(100));
+    
     let client = OpenAIClient::new()?;
     let transcript = client
         .transcribe(audio_data, &format!("{}.mp3", video_name))
         .await?;
+    
+    spinner.finish_with_message(format!("{} Audio transcribed", CHECK));
 
     Ok(transcript)
 }
@@ -132,13 +206,31 @@ async fn process_long_video(
     duration: u32,
     tmp_dir: &Path,
 ) -> Result<String> {
-    println!("⚠️ Video longer than 1300 seconds, processing in chunks...");
+    println!(
+        "{} Video longer than 1300 seconds, processing in chunks...",
+        WARNING
+    );
 
     let num_chunks = duration.div_ceil(1300);
-    println!("Will create {} chunks", num_chunks);
+    println!(
+        "   Will create {} chunks",
+        style(num_chunks).cyan().bold()
+    );
+    println!();
 
     let (tx, mut rx) = mpsc::channel(num_chunks as usize);
     let client = OpenAIClient::new()?;
+
+    // Create multi-progress bar
+    let multi_progress = MultiProgress::new();
+    let overall_progress = multi_progress.add(ProgressBar::new(num_chunks as u64));
+    overall_progress.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} chunks processed")
+            .unwrap()
+            .progress_chars("#>-"),
+    );
+    overall_progress.set_message("Processing chunks");
 
     // Process chunks concurrently
     let mut handles = Vec::new();
@@ -149,11 +241,21 @@ async fn process_long_video(
         let video_path = video_path.to_path_buf();
         let video_name = video_name.to_string();
         let tmp_dir = tmp_dir.to_path_buf();
+        let chunk_progress = multi_progress.add(ProgressBar::new_spinner());
+        chunk_progress.set_style(
+            ProgressStyle::default_spinner()
+                .template("    {spinner:.green} Chunk {msg}")
+                .unwrap(),
+        );
 
         let handle = task::spawn(async move {
+            chunk_progress.set_message(format!("{}/{}: Starting...", i + 1, num_chunks));
+            chunk_progress.enable_steady_tick(Duration::from_millis(100));
+            
             let result =
-                process_chunk(&video_path, &video_name, i, duration, &tmp_dir, &client).await;
+                process_chunk(&video_path, &video_name, i, duration, &tmp_dir, &client, &chunk_progress).await;
 
+            chunk_progress.finish_and_clear();
             tx.send((i, result)).await.unwrap();
         });
 
@@ -167,7 +269,10 @@ async fn process_long_video(
     let mut chunks = Vec::new();
     while let Some((index, result)) = rx.recv().await {
         match result {
-            Ok(transcript) => chunks.push((index, transcript)),
+            Ok(transcript) => {
+                chunks.push((index, transcript));
+                overall_progress.inc(1);
+            }
             Err(e) => anyhow::bail!("Failed to process chunk {}: {}", index, e),
         }
     }
@@ -177,6 +282,8 @@ async fn process_long_video(
         handle.await?;
     }
 
+    overall_progress.finish_with_message("All chunks processed!");
+
     // Sort chunks by index and combine
     chunks.sort_by_key(|c| c.0);
     let full_transcript = chunks
@@ -185,7 +292,7 @@ async fn process_long_video(
         .collect::<Vec<_>>()
         .join(" ");
 
-    println!("✅ All chunks merged into complete transcript");
+    println!("{} All chunks merged into complete transcript", CHECK);
     Ok(full_transcript)
 }
 
@@ -196,6 +303,7 @@ async fn process_chunk(
     total_duration: u32,
     tmp_dir: &Path,
     client: &OpenAIClient,
+    progress: &ProgressBar,
 ) -> Result<String> {
     let start_time = chunk_index * 1300;
     let mut chunk_duration = 1300;
@@ -204,12 +312,13 @@ async fn process_chunk(
         chunk_duration = total_duration - start_time;
     }
 
-    println!(
-        "Processing chunk {} ({}-{}s)...",
+    progress.set_message(format!(
+        "{}/{}: Processing ({}-{}s)",
         chunk_index + 1,
+        (total_duration.div_ceil(1300)),
         start_time,
         start_time + chunk_duration
-    );
+    ));
 
     let chunk_audio_file = tmp_dir.join(format!("{}_chunk_{}.mp3", video_name, chunk_index));
     let chunk_transcript_file = tmp_dir.join(format!(
@@ -219,16 +328,22 @@ async fn process_chunk(
 
     // Check cache
     if chunk_transcript_file.exists() {
-        println!(
-            "Chunk {} transcript already exists, using cached version...",
-            chunk_index + 1
-        );
+        progress.set_message(format!(
+            "{}/{}: Using cached transcript",
+            chunk_index + 1,
+            (total_duration.div_ceil(1300))
+        ));
         return fs::read_to_string(&chunk_transcript_file)
             .context("Failed to read cached chunk transcript");
     }
 
     // Extract audio chunk if not exists
     if !chunk_audio_file.exists() {
+        progress.set_message(format!(
+            "{}/{}: Extracting audio",
+            chunk_index + 1,
+            (total_duration.div_ceil(1300))
+        ));
         extract_audio(
             video_path,
             &chunk_audio_file,
@@ -238,6 +353,11 @@ async fn process_chunk(
     }
 
     // Compress if needed and transcribe
+    progress.set_message(format!(
+        "{}/{}: Transcribing",
+        chunk_index + 1,
+        (total_duration.div_ceil(1300))
+    ));
     let audio_data = compress_if_needed(&chunk_audio_file).await?;
     let transcript = client
         .transcribe(
@@ -248,7 +368,11 @@ async fn process_chunk(
 
     // Save chunk transcript
     fs::write(&chunk_transcript_file, &transcript)?;
-    println!("✅ Chunk {} transcribed and cached", chunk_index + 1);
+    progress.set_message(format!(
+        "{}/{}: Completed",
+        chunk_index + 1,
+        (total_duration.div_ceil(1300))
+    ));
 
     Ok(transcript)
 }
@@ -289,7 +413,14 @@ async fn compress_if_needed(audio_file: &Path) -> Result<Vec<u8>> {
     let size_mb = metadata.len() / 1024 / 1024;
 
     if size_mb > 24 {
-        println!("File too large ({}MB), compressing...", size_mb);
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.green} {msg}")
+                .unwrap(),
+        );
+        spinner.set_message(format!("Compressing large file ({}MB)...", size_mb));
+        spinner.enable_steady_tick(Duration::from_millis(100));
 
         let compressed_path = audio_file.with_extension("compressed.mp3");
 
@@ -311,11 +442,13 @@ async fn compress_if_needed(audio_file: &Path) -> Result<Vec<u8>> {
             .output()?;
 
         if !output.status.success() {
+            spinner.finish_with_message("Compression failed");
             anyhow::bail!("Failed to compress audio");
         }
 
         let data = fs::read(&compressed_path)?;
         fs::remove_file(&compressed_path)?;
+        spinner.finish_with_message(format!("Compressed to {}MB", data.len() / 1024 / 1024));
         Ok(data)
     } else {
         fs::read(audio_file).context("Failed to read audio file")
@@ -346,11 +479,19 @@ async fn generate_content_from_transcript(transcript: &str) -> Result<ContentRes
 }
 
 fn save_outputs(video_name: &str, tmp_dir: &Path, content: &ContentResponse) -> Result<()> {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    spinner.set_message("Saving output files...");
+    spinner.enable_steady_tick(Duration::from_millis(100));
+
     // Save JSON
     let content_file = tmp_dir.join(format!("{}_content.json", video_name));
     let json = serde_json::to_string_pretty(content)?;
     fs::write(&content_file, json)?;
-    println!("✅ Content saved to: {:?}", content_file);
 
     // Save titles
     let titles_file = tmp_dir.join(format!("{}_titles.txt", video_name));
@@ -385,20 +526,24 @@ fn save_outputs(video_name: &str, tmp_dir: &Path, content: &ContentResponse) -> 
         .join("\n");
     fs::write(&status_file, status_updates)?;
 
-    println!("Generated files:");
+    spinner.finish_with_message("All files saved!");
+    println!();
+
+    println!("{} {}:", style("Generated files").bold(), PACKAGE);
     println!(
-        "  📝 Transcript: {:?}",
-        tmp_dir.join(format!("{}_transcript.txt", video_name))
+        "  📝 Transcript: {}",
+        style(tmp_dir.join(format!("{}_transcript.txt", video_name)).display()).dim()
     );
-    println!("  📋 Full content: {:?}", content_file);
-    println!("  🏷️ Titles: {:?}", titles_file);
-    println!("  📄 Descriptions: {:?}", descriptions_file);
-    println!("  💬 Status updates: {:?}", status_file);
+    println!("  📋 Full content: {}", style(content_file.display()).dim());
+    println!("  🏷️ Titles: {}", style(titles_file.display()).dim());
+    println!("  📄 Descriptions: {}", style(descriptions_file.display()).dim());
+    println!("  💬 Status updates: {}", style(status_file.display()).dim());
+    println!();
 
     // Display preview of titles
-    println!("\nPreview of generated titles:");
+    println!("{}", style("Generated titles:").bold().cyan());
     for (i, title) in content.titles.iter().enumerate() {
-        println!("{}. {}", i + 1, title);
+        println!("  {}. {}", style(i + 1).dim(), style(title).green());
     }
 
     Ok(())
