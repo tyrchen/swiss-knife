@@ -6,11 +6,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
+use swiss_knife::{ContentResponse, OpenAIClient};
 use tokio::sync::mpsc;
 use tokio::task;
-
-mod openai;
-use openai::{ContentResponse, OpenAIClient};
 
 static MOVIE: Emoji<'_, '_> = Emoji("🎬 ", "");
 static SPARKLES: Emoji<'_, '_> = Emoji("✨ ", "");

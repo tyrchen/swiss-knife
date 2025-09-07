@@ -53,6 +53,24 @@ pub struct ContentResponse {
     pub status_updates: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub struct ImageGenerationRequest {
+    pub model: String,
+    pub prompt: String,
+    pub n: u32,
+    pub size: String,
+}
+
+#[derive(Deserialize)]
+pub struct ImageGenerationResponse {
+    pub data: Vec<ImageData>,
+}
+
+#[derive(Deserialize)]
+pub struct ImageData {
+    pub b64_json: String,
+}
+
 impl OpenAIClient {
     pub fn new() -> Result<Self> {
         let api_key =
@@ -148,5 +166,49 @@ impl OpenAIClient {
             serde_json::from_str(content).context("Failed to parse GPT response as JSON")?;
 
         Ok(content_response)
+    }
+
+    pub async fn generate_image(&self, prompt: &str, size: &str) -> Result<Vec<u8>> {
+        let url = format!("{}/images/generations", self.base_url);
+
+        let request = ImageGenerationRequest {
+            model: "gpt-image-1".to_string(),
+            prompt: prompt.to_string(),
+            n: 1,
+            size: size.to_string(),
+        };
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await?;
+            anyhow::bail!(
+                "Image generation API call failed with status {}: {}",
+                status,
+                text
+            );
+        }
+
+        let result: ImageGenerationResponse = response.json().await?;
+
+        if result.data.is_empty() {
+            anyhow::bail!("No images returned from API");
+        }
+
+        // Decode base64 to bytes
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let image_bytes = STANDARD
+            .decode(&result.data[0].b64_json)
+            .context("Failed to decode base64 image data")?;
+
+        Ok(image_bytes)
     }
 }

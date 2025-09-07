@@ -25,6 +25,10 @@ exclude = [
 name = "convert"
 path = "src/convert.rs"
 
+[[bin]]
+name = "imgen"
+path = "src/imgen.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = [
@@ -40,6 +44,12 @@ clap = { version = "4", features = ["derive"] }
 rayon = "1.11"
 indicatif = "0.18"
 console = "0.16"
+blake3 = "1.8.2"
+serde_yaml = "0.9"
+slug = "0.1"
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+base64 = "0.22"
 
 [profile.release]
 opt-level = "z"   # Optimize for size
