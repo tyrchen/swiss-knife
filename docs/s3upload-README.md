@@ -37,6 +37,7 @@ AWS_REGION=us-west-2
 AWS_PROFILE=default  # Optional
 S3_BUCKET=my-bucket-name
 S3_TARGET_PATH=uploads  # Optional prefix for all uploads
+LOG_LEVEL=info  # Optional: error, warn, info, debug, trace
 ```
 
 ### Configuration Options
@@ -47,6 +48,7 @@ S3_TARGET_PATH=uploads  # Optional prefix for all uploads
 | `AWS_PROFILE` | No | AWS CLI profile to use (defaults to default profile) | `my-profile` |
 | `S3_BUCKET` | Yes | S3 bucket name | `my-bucket` |
 | `S3_TARGET_PATH` | No | Path prefix for uploaded files (defaults to bucket root) | `uploads/videos` |
+| `LOG_LEVEL` | No | Logging verbosity (error, warn, info, debug, trace) | `info` |
 
 ## AWS Credentials
 
@@ -284,6 +286,49 @@ The tool provides clear error messages for common issues:
 - **File not found**: Reports missing local files
 
 Errors are reported but don't stop processing of other files. The final summary shows the count of failed uploads.
+
+## Logging and Debugging
+
+The tool uses structured logging to help diagnose issues. You can control the verbosity in two ways:
+
+### Via .env file (Recommended)
+
+Add `LOG_LEVEL` to your `.env` file:
+
+```env
+LOG_LEVEL=debug
+```
+
+Available levels (from least to most verbose):
+- `error` - Only show errors
+- `warn` - Show warnings and errors
+- `info` - General information (default)
+- `debug` - Detailed debugging information
+- `trace` - Very verbose, shows all internal operations
+
+### Via environment variable
+
+For one-time debugging, use the `RUST_LOG` or `LOG_LEVEL` environment variable:
+
+```bash
+# Using LOG_LEVEL
+LOG_LEVEL=debug s3upload file.mp4
+
+# Using RUST_LOG (more advanced filtering)
+RUST_LOG=debug s3upload file.mp4
+RUST_LOG=s3upload=trace s3upload file.mp4  # Only trace s3upload code
+```
+
+### Debug Output Example
+
+With `LOG_LEVEL=debug`, you'll see:
+
+```
+DEBUG Starting upload: video.mp4 (125663232 bytes) -> s3://my-bucket/uploads/video.mp4
+DEBUG File sizes match (125663232 bytes), comparing content hash
+DEBUG File content matches (MD5: 5eb63bbbe01eeed093cb22bb8f5acdc3)
+INFO Successfully uploaded: video.mp4 -> s3://my-bucket/uploads/video.mp4
+```
 
 ## Troubleshooting
 

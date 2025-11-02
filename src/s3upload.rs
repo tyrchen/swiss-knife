@@ -205,10 +205,19 @@ impl Stats {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing/logging
+    // Load .env file early to get LOG_LEVEL
+    dotenv::dotenv().ok();
+
+    // Initialize tracing/logging with support for LOG_LEVEL from .env
+    let log_level = std::env::var("LOG_LEVEL")
+        .ok()
+        .or_else(|| std::env::var("RUST_LOG").ok())
+        .unwrap_or_else(|| "info".to_string());
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
+                .or_else(|_| tracing_subscriber::EnvFilter::try_new(&log_level))
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .with_target(false)
