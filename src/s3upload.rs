@@ -12,7 +12,11 @@ use tokio::sync::{mpsc, Mutex};
 use walkdir::WalkDir;
 
 use config::Config;
-use s3::{compare::compare_file, generate_presigned_url, upload_file, S3Client, UploadResult};
+use s3::{
+    compare::compare_file, generate_presigned_url, upload_file, upload_multipart, S3Client,
+    UploadResult, MULTIPART_THRESHOLD,
+};
+use tracing::{error, info};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -113,7 +117,21 @@ impl Stats {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize tracing/logging
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_target(false)
+        .with_level(true)
+        .init();
+
     let cli = Cli::parse();
+
+    info!("S3 Upload Tool v{}", env!("CARGO_PKG_VERSION"));
+    info!("Concurrent workers: {}", cli.max_concurrent);
+
     let config = Config::from_env()?;
 
     // Initialize S3 client
@@ -532,16 +550,33 @@ async fn process_upload_with_result(
             })
         }
         s3::FileComparison::NotFound | s3::FileComparison::Different => {
-            // Upload file
-            match upload_file(
-                s3_client.client(),
-                s3_client.bucket(),
-                &s3_key,
-                file_path,
-                Some(pb),
-            )
-            .await
-            {
+            // Choose upload strategy based on file size
+            let upload_result = if file_size >= MULTIPART_THRESHOLD {
+                info!(
+                    "Using multipart upload for large file: {} ({} bytes)",
+                    relative_path, file_size
+                );
+                upload_multipart(
+                    s3_client.client(),
+                    s3_client.bucket(),
+                    &s3_key,
+                    file_path,
+                    Some(pb),
+                )
+                .await
+                .map(|_| UploadResult::Uploaded)
+            } else {
+                upload_file(
+                    s3_client.client(),
+                    s3_client.bucket(),
+                    &s3_key,
+                    file_path,
+                    Some(pb),
+                )
+                .await
+            };
+
+            match upload_result {
                 Ok(UploadResult::Uploaded) => {
                     // Generate pre-signed URL
                     let url =
@@ -570,6 +605,7 @@ async fn process_upload_with_result(
                     })
                 }
                 Err(e) => {
+                    error!("Upload failed for {}: {:#}", relative_path, e);
                     stats.failed.fetch_add(1, Ordering::Relaxed);
 
                     Ok(ProcessResult::Failed {

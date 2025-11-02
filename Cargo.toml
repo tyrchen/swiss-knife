@@ -55,9 +55,16 @@ tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 base64 = "0.22"
 dotenv = "0.15"
-aws-config = { version = "1.5", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.68"
+aws-config = { version = "1.8", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.110"
 walkdir = "2.5"
+thiserror = "2.0"
+md-5 = "0.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3.23"
 
 [profile.release]
 opt-level = "z"   # Optimize for size

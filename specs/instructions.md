@@ -19,3 +19,7 @@ s3upload . --url-only # generate s3 pre-signed url for all files in the current 
 ```
 
 Build the tool using Rust with dotenv, clap, and aws sdk. Make UI pretty and user friendly (with progress bar, etc.). First generate a design and implementation plan at ./specs/, then implement the tool entirely.
+
+## Improve code quality
+
+For s3upload tool, Review the code carefully and think ultra hard about how to improve the code quality, the features of the tool itself and the user experience. Write down your thoughts, deisgn and implementation plan in ./specs/0006-s3upload-improvements.md.
