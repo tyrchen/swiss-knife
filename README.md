@@ -23,6 +23,23 @@ A high-performance tool for video transcription and AI-powered content generatio
 - 🎨 **Colored Output**: User-friendly colored terminal output
 - 📦 **Auto-compression**: Large audio files are compressed to meet API limits
 
+### 2. imgen - AI Image Generation
+
+Generate images using OpenAI's DALL-E API.
+
+### 3. s3upload - AWS S3 File Uploader
+
+A smart S3 uploader with intelligent file comparison and pre-signed URL generation.
+
+**Features:**
+
+- 📦 **Smart Upload**: Automatically skips files that are identical on S3
+- 🔗 **Pre-signed URLs**: Generates 7-day valid URLs for sharing
+- 📊 **Progress Bars**: Real-time upload progress tracking
+- 📁 **Directory Support**: Upload single files or entire directories
+- ⚡ **URL-Only Mode**: Generate pre-signed URLs without uploading
+- 🎨 **Beautiful Output**: Colorful, user-friendly console interface
+
 ## Installation
 
 ### From crates.io (Recommended)
@@ -81,9 +98,39 @@ Video duration: 2500 seconds
 📦 All files saved in /tmp
 ```
 
-### More Tools Coming Soon
+### s3upload - AWS S3 Uploader
 
-Stay tuned for additional utilities to be added to the Swiss Knife collection!
+```bash
+# Create .env file with AWS configuration
+cat > .env << EOF
+AWS_REGION=us-west-2
+S3_BUCKET=my-bucket
+S3_TARGET_PATH=uploads
+EOF
+
+# Upload a single file
+s3upload ./video.mp4
+
+# Upload entire directory
+s3upload ./videos
+
+# Generate pre-signed URLs only (no upload)
+s3upload ./video.mp4 --url-only
+```
+
+**Output Example:**
+
+```text
+📦 Target: s3://my-bucket/uploads/
+✓ video.mp4 (15.2 MB)
+  🔗 https://my-bucket.s3.amazonaws.com/uploads/video.mp4?X-Amz-...
+↻ video2.mp4 (skipped - identical, 10.5 MB)
+  🔗 https://my-bucket.s3.amazonaws.com/uploads/video2.mp4?X-Amz-...
+
+Summary: 1 uploaded, 1 skipped, 0 failed
+```
+
+For detailed documentation, see [specs/s3upload-README.md](specs/s3upload-README.md)
 
 ## System Requirements
 
@@ -92,6 +139,11 @@ Stay tuned for additional utilities to be added to the Swiss Knife collection!
 - FFmpeg (for audio extraction)
 - FFprobe (for video analysis)
 - OpenAI API key
+
+### For s3upload tool
+
+- Valid AWS credentials (via environment, credentials file, or IAM role)
+- S3 bucket with appropriate permissions
 
 ### General
 

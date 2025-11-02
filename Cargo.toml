@@ -29,6 +29,10 @@ path = "src/convert.rs"
 name = "imgen"
 path = "src/imgen.rs"
 
+[[bin]]
+name = "s3upload"
+path = "src/s3upload.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = [
@@ -50,6 +54,10 @@ slug = "0.1"
 tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 base64 = "0.22"
+dotenv = "0.15"
+aws-config = { version = "1.5", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.68"
+walkdir = "2.5"
 
 [profile.release]
 opt-level = "z"   # Optimize for size
