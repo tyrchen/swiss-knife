@@ -14,8 +14,21 @@ use s3::{compare::compare_file, generate_presigned_url, upload_file, S3Client, U
 #[derive(Parser, Debug)]
 #[command(
     name = "s3upload",
+    version = env!("CARGO_PKG_VERSION"),
+    author = "Tyr Chen <tyr.chen@gmail.com>",
     about = "Upload files to AWS S3 with smart comparison and pre-signed URLs",
-    version
+    long_about = "A smart S3 uploader that automatically skips identical files and generates 7-day valid pre-signed URLs. \
+                  Supports directory uploads with file extension filtering. Configure via .env file with AWS credentials.",
+    after_help = "Examples:\n  \
+                  s3upload ./video.mp4                    # Upload single file\n  \
+                  s3upload .                              # Upload all mp4/mov files in current directory\n  \
+                  s3upload ./videos -e mp4,mov,avi        # Upload with custom extensions\n  \
+                  s3upload ./video.mp4 --url-only         # Generate pre-signed URL only\n\n\
+                  Configuration (.env):\n  \
+                  AWS_REGION=us-west-2\n  \
+                  S3_BUCKET=my-bucket\n  \
+                  S3_TARGET_PATH=uploads\n\n\
+                  For more information: https://github.com/tyrchen/swiss-knife"
 )]
 struct Cli {
     /// File or directory to upload

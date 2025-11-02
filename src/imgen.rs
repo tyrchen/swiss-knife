@@ -13,10 +13,38 @@ use tokio::sync::Semaphore;
 const MAX_CONCURRENT_REQUESTS: usize = 32;
 
 #[derive(Parser)]
-#[command(name = "imgen")]
-#[command(about = "Generate images from YAML configuration using OpenAI's image generation API")]
+#[command(
+    name = "imgen",
+    version = env!("CARGO_PKG_VERSION"),
+    author = "Tyr Chen <tyr.chen@gmail.com>",
+    about = "Generate images from YAML configuration using OpenAI's DALL-E API",
+    long_about = "Batch generate images using OpenAI's DALL-E based on YAML configuration. \
+                  Supports multiple themes and prompts, parallel processing (up to 32 concurrent requests), \
+                  and automatic caching to skip previously generated images.",
+    after_help = "Examples:\n  \
+                  imgen config.yaml                       # Generate images from YAML config\n  \
+                  imgen themes.yaml                       # Process multiple themes and prompts\n\n\
+                  YAML Configuration Format:\n  \
+                  system_prompt: \"...\"                    # Base instructions for all images\n  \
+                  style: \"minimalist\"                     # Art style to apply\n  \
+                  themes:                                 # List of themes\n    \
+                  - name: \"Nature\"\n      \
+                  instructions: \"...\"\n  \
+                  prompts:                                # List of prompts\n    \
+                  - name: \"Sunset\"\n      \
+                  prompt: \"...\"\n\n\
+                  Requirements:\n  \
+                  - OPENAI_API_KEY environment variable set\n\n\
+                  Features:\n  \
+                  - Concurrent image generation (32 max)\n  \
+                  - Smart caching (skips existing images)\n  \
+                  - Progress tracking with status\n  \
+                  - Organized output by theme and prompt\n\n\
+                  For more information: https://github.com/tyrchen/swiss-knife"
+)]
 struct Args {
     /// Path to the YAML configuration file
+    #[arg(value_name = "YAML_FILE")]
     yaml_file: PathBuf,
 }
 

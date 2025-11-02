@@ -17,9 +17,31 @@ static PACKAGE: Emoji<'_, '_> = Emoji("📦 ", "");
 static WARNING: Emoji<'_, '_> = Emoji("⚠️  ", "");
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    name = "convert",
+    version = env!("CARGO_PKG_VERSION"),
+    author = "Tyr Chen <tyr.chen@gmail.com>",
+    about = "Video transcription and AI-powered content generation",
+    long_about = "Extract audio from videos, transcribe using OpenAI Whisper, and generate content with GPT. \
+                  Automatically handles long videos by splitting into chunks and processing in parallel. \
+                  Supports caching to avoid reprocessing.",
+    after_help = "Examples:\n  \
+                  convert ./lecture.mp4                   # Transcribe and generate content\n  \
+                  convert ~/Videos/presentation.mov       # Process video file\n\n\
+                  Requirements:\n  \
+                  - FFmpeg and FFprobe installed\n  \
+                  - OPENAI_API_KEY environment variable set\n\n\
+                  Features:\n  \
+                  - Automatic chunking for long videos (>1300s)\n  \
+                  - Parallel processing of chunks\n  \
+                  - Smart caching to avoid reprocessing\n  \
+                  - Audio compression for large files\n  \
+                  - Real-time progress tracking\n\n\
+                  For more information: https://github.com/tyrchen/swiss-knife"
+)]
 struct Args {
     /// Video file to process
+    #[arg(value_name = "VIDEO_FILE")]
     video_file: PathBuf,
 }
 

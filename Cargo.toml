@@ -1,6 +1,6 @@
 [package]
 name = "swiss-knife"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Tyr Chen <tyr.chen@gmail.com>"]
 homepage = "https://github.com/tyrchen/swiss-knife"
