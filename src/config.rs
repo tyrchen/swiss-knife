@@ -231,10 +231,7 @@ mod tests {
 
         assert_eq!(config.build_s3_key("file.mp4"), "uploads/file.mp4");
         assert_eq!(config.build_s3_key("./file.mp4"), "uploads/file.mp4");
-        assert_eq!(
-            config.build_s3_key("dir/file.mp4"),
-            "uploads/dir/file.mp4"
-        );
+        assert_eq!(config.build_s3_key("dir/file.mp4"), "uploads/dir/file.mp4");
 
         // Test with empty target path
         let config_no_prefix = Config {

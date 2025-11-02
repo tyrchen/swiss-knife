@@ -22,4 +22,4 @@ Build the tool using Rust with dotenv, clap, and aws sdk. Make UI pretty and use
 
 ## Improve code quality
 
-For s3upload tool, Review the code carefully and think ultra hard about how to improve the code quality, the features of the tool itself and the user experience. Write down your thoughts, deisgn and implementation plan in ./specs/0006-s3upload-improvements.md.
+For s3upload tool, Review the code carefully and think ultra hard about how to improve the code quality, the features of the tool itself and the user experience. Write down your thoughts, design and implementation plan in ./specs/0006-s3upload-improvements.md.

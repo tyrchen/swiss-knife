@@ -41,7 +41,12 @@ pub async fn compare_file(
     s3_key: &str,
     local_path: &Path,
 ) -> Result<FileComparison> {
-    trace!("Comparing local file {} with s3://{}/{}", local_path.display(), bucket, s3_key);
+    trace!(
+        "Comparing local file {} with s3://{}/{}",
+        local_path.display(),
+        bucket,
+        s3_key
+    );
 
     // Get local file size
     let local_metadata = tokio::fs::metadata(local_path).await?;
@@ -63,7 +68,10 @@ pub async fn compare_file(
                 return Ok(FileComparison::Different);
             }
 
-            debug!("File sizes match ({} bytes), comparing content hash", local_size);
+            debug!(
+                "File sizes match ({} bytes), comparing content hash",
+                local_size
+            );
 
             // Size matches - now compare content hash
             // For S3 simple uploads (non-multipart), ETag is MD5

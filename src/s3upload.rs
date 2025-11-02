@@ -18,6 +18,10 @@ use s3::{
 };
 use tracing::{error, info};
 
+// Future use - keeping imports for Phase 5 integration
+#[allow(unused_imports)]
+use s3::{detect_content_type, generate_presigned_url_with_expiry, parse_metadata, parse_tags};
+
 #[derive(Parser, Debug)]
 #[command(
     name = "s3upload",
@@ -52,15 +56,67 @@ struct Cli {
     /// Maximum number of concurrent uploads
     #[arg(long, short = 'c', default_value = "4")]
     max_concurrent: usize,
+
+    /// Perform a dry run (show what would be uploaded without uploading)
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Pre-signed URL expiration in hours (default: 168 = 7 days, max: 168)
+    #[arg(long, default_value = "168")]
+    url_expiry_hours: u64,
+
+    /// Custom metadata (key=value pairs, comma-separated)
+    #[arg(long)]
+    metadata: Option<String>,
+
+    /// Tags (key=value pairs, comma-separated)
+    #[arg(long)]
+    tags: Option<String>,
+
+    /// Override Content-Type for uploaded files
+    #[arg(long)]
+    content_type: Option<String>,
+
+    /// Flatten directory structure (remove subdirectories)
+    #[arg(long)]
+    flatten: bool,
+
+    /// Custom path prefix (overrides S3_TARGET_PATH for this upload)
+    #[arg(long)]
+    prefix: Option<String>,
+
+    /// Sync mode: delete remote files not present locally
+    #[arg(long)]
+    sync: bool,
+
+    /// Interactive mode: prompt for conflicts
+    #[arg(long, short = 'i')]
+    interactive: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Stats {
     uploaded: AtomicUsize,
     skipped: AtomicUsize,
     failed: AtomicUsize,
     urls_generated: AtomicUsize,
     not_found: AtomicUsize,
+    total_bytes_uploaded: std::sync::atomic::AtomicU64,
+    start_time: std::time::Instant,
+}
+
+impl Default for Stats {
+    fn default() -> Self {
+        Self {
+            uploaded: AtomicUsize::new(0),
+            skipped: AtomicUsize::new(0),
+            failed: AtomicUsize::new(0),
+            urls_generated: AtomicUsize::new(0),
+            not_found: AtomicUsize::new(0),
+            total_bytes_uploaded: std::sync::atomic::AtomicU64::new(0),
+            start_time: std::time::Instant::now(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -90,16 +146,48 @@ enum ProcessResult {
 
 impl Stats {
     fn print_upload_summary(&self) {
+        let duration = self.start_time.elapsed();
+        let total_bytes = self
+            .total_bytes_uploaded
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let uploaded_count = self.uploaded.load(Ordering::Relaxed);
+        let skipped_count = self.skipped.load(Ordering::Relaxed);
+        let failed_count = self.failed.load(Ordering::Relaxed);
+
+        println!("\n{}", style("═".repeat(70)).dim());
         println!(
             "{}",
             style(format!(
                 "Summary: {} uploaded, {} skipped, {} failed",
-                self.uploaded.load(Ordering::Relaxed),
-                self.skipped.load(Ordering::Relaxed),
-                self.failed.load(Ordering::Relaxed)
+                uploaded_count, skipped_count, failed_count
             ))
             .bold()
         );
+
+        if total_bytes > 0 {
+            println!(
+                "{}",
+                style(format!(
+                    "Total uploaded: {} ({} bytes)",
+                    format_size(total_bytes),
+                    total_bytes
+                ))
+                .dim()
+            );
+        }
+
+        if duration.as_secs() > 0 {
+            let speed = total_bytes as f64 / duration.as_secs_f64() / 1024.0 / 1024.0;
+            println!(
+                "{}",
+                style(format!(
+                    "Time: {:.2}s, Average speed: {:.2} MB/s",
+                    duration.as_secs_f64(),
+                    speed
+                ))
+                .dim()
+            );
+        }
     }
 
     fn print_url_summary(&self) {
@@ -165,6 +253,70 @@ async fn main() -> Result<()> {
 
     let multi = Arc::new(MultiProgress::new());
     let stats = Arc::new(Stats::default());
+
+    // Handle dry-run mode
+    if cli.dry_run {
+        println!(
+            "{}",
+            style("🔍 DRY RUN MODE - No files will be uploaded")
+                .yellow()
+                .bold()
+        );
+        println!();
+
+        for file in &files {
+            let relative_path = get_relative_path(&cli.path, file, cli.flatten)?;
+            let s3_key = if let Some(ref prefix) = cli.prefix {
+                format!(
+                    "{}/{}",
+                    prefix.trim_end_matches('/'),
+                    relative_path.trim_start_matches("./")
+                )
+            } else {
+                config.build_s3_key(&relative_path)
+            };
+
+            let metadata = tokio::fs::metadata(file).await?;
+            let size = format_size(metadata.len());
+
+            // Check if file exists on S3
+            let comparison =
+                compare_file(s3_client.client(), s3_client.bucket(), &s3_key, file).await?;
+
+            match comparison {
+                s3::FileComparison::NotFound => {
+                    println!(
+                        "  {} {} → s3://{}/{} ({})",
+                        style("WOULD UPLOAD").green().bold(),
+                        relative_path,
+                        s3_client.bucket(),
+                        s3_key,
+                        size
+                    );
+                }
+                s3::FileComparison::Different => {
+                    println!(
+                        "  {} {} → s3://{}/{} ({})",
+                        style("WOULD UPDATE").yellow().bold(),
+                        relative_path,
+                        s3_client.bucket(),
+                        s3_key,
+                        size
+                    );
+                }
+                s3::FileComparison::Identical => {
+                    println!(
+                        "  {} {} ({})",
+                        style("WOULD SKIP").dim(),
+                        relative_path,
+                        size
+                    );
+                }
+            }
+        }
+
+        return Ok(());
+    }
 
     if cli.url_only {
         // URL-only mode - concurrent URL generation using mpsc
@@ -478,8 +630,21 @@ fn collect_files(path: &Path, allowed_extensions: &[String]) -> Result<Vec<PathB
 }
 
 /// Get relative path for S3 key construction
-fn get_relative_path(base: &Path, file: &Path) -> Result<String> {
-    if base.is_file() {
+///
+/// # Arguments
+///
+/// * `base` - Base path (file or directory)
+/// * `file` - File to get relative path for
+/// * `flatten` - If true, ignore directory structure
+fn get_relative_path(base: &Path, file: &Path, flatten: bool) -> Result<String> {
+    if flatten {
+        // Just use filename, ignore directory structure
+        Ok(file
+            .file_name()
+            .context("Failed to get filename")?
+            .to_string_lossy()
+            .to_string())
+    } else if base.is_file() {
         // For single file, just use the filename
         Ok(file
             .file_name()
@@ -523,7 +688,7 @@ async fn process_upload_with_result(
     pb: &ProgressBar,
     stats: &Arc<Stats>,
 ) -> Result<ProcessResult> {
-    let relative_path = get_relative_path(base_path, file_path)?;
+    let relative_path = get_relative_path(base_path, file_path, false)?;
     let s3_key = config.build_s3_key(&relative_path);
 
     // Get file size for display
@@ -626,7 +791,7 @@ async fn process_url_only_with_result(
     base_path: &Path,
     stats: &Arc<Stats>,
 ) -> Result<ProcessResult> {
-    let relative_path = get_relative_path(base_path, file_path)?;
+    let relative_path = get_relative_path(base_path, file_path, false)?;
     let s3_key = config.build_s3_key(&relative_path);
 
     // Check if file exists on S3

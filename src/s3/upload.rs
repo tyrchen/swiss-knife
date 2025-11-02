@@ -137,7 +137,10 @@ async fn upload_file_inner(
     // Update progress bar - show indeterminate progress during upload
     if let Some(pb) = pb {
         pb.set_length(file_size);
-        pb.set_message(format!("Uploading {}", local_path.file_name().unwrap().to_string_lossy()));
+        pb.set_message(format!(
+            "Uploading {}",
+            local_path.file_name().unwrap().to_string_lossy()
+        ));
         pb.set_position(0);
         pb.enable_steady_tick(std::time::Duration::from_millis(100));
     }
@@ -164,7 +167,10 @@ async fn upload_file_inner(
     // Mark upload complete
     if let Some(pb) = pb {
         pb.set_position(file_size);
-        pb.finish_with_message(format!("✓ {}", local_path.file_name().unwrap().to_string_lossy()));
+        pb.finish_with_message(format!(
+            "✓ {}",
+            local_path.file_name().unwrap().to_string_lossy()
+        ));
     }
 
     info!(
