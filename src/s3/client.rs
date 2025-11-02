@@ -4,6 +4,7 @@ use aws_sdk_s3::Client;
 
 use crate::config::Config;
 
+#[derive(Clone)]
 pub struct S3Client {
     client: Client,
     pub config: Config,

@@ -6,6 +6,9 @@ use clap::Parser;
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
 use walkdir::WalkDir;
 
 use config::Config;
@@ -41,15 +44,71 @@ struct Cli {
     /// Allowed file extensions (comma-separated, e.g., "mp4,mov,avi")
     #[arg(long, short = 'e', default_value = "mp4,mov", value_delimiter = ',')]
     extensions: Vec<String>,
+
+    /// Maximum number of concurrent uploads
+    #[arg(long, short = 'c', default_value = "4")]
+    max_concurrent: usize,
 }
 
 #[derive(Debug, Default)]
 struct Stats {
-    uploaded: usize,
-    skipped: usize,
-    failed: usize,
-    urls_generated: usize,
-    not_found: usize,
+    uploaded: AtomicUsize,
+    skipped: AtomicUsize,
+    failed: AtomicUsize,
+    urls_generated: AtomicUsize,
+    not_found: AtomicUsize,
+}
+
+#[derive(Debug, Clone)]
+enum ProcessResult {
+    Uploaded {
+        filename: String,
+        size: String,
+        url: String,
+    },
+    Skipped {
+        filename: String,
+        size: String,
+        url: String,
+    },
+    Failed {
+        filename: String,
+        error: String,
+    },
+    UrlGenerated {
+        filename: String,
+        url: String,
+    },
+    NotFound {
+        filename: String,
+    },
+}
+
+impl Stats {
+    fn print_upload_summary(&self) {
+        println!(
+            "{}",
+            style(format!(
+                "Summary: {} uploaded, {} skipped, {} failed",
+                self.uploaded.load(Ordering::Relaxed),
+                self.skipped.load(Ordering::Relaxed),
+                self.failed.load(Ordering::Relaxed)
+            ))
+            .bold()
+        );
+    }
+
+    fn print_url_summary(&self) {
+        println!(
+            "{}",
+            style(format!(
+                "Summary: {} URL(s) generated, {} not found",
+                self.urls_generated.load(Ordering::Relaxed),
+                self.not_found.load(Ordering::Relaxed)
+            ))
+            .bold()
+        );
+    }
 }
 
 #[tokio::main]
@@ -86,53 +145,276 @@ async fn main() -> Result<()> {
         .bold()
     );
 
-    let multi = MultiProgress::new();
-    let mut stats = Stats::default();
+    let multi = Arc::new(MultiProgress::new());
+    let stats = Arc::new(Stats::default());
 
     if cli.url_only {
-        // URL-only mode
-        println!("{}", style("🔗 Generating pre-signed URLs...").cyan());
+        // URL-only mode - concurrent URL generation using mpsc
+        println!(
+            "{}",
+            style(format!(
+                "🔗 Generating pre-signed URLs ({} workers)...",
+                cli.max_concurrent
+            ))
+            .cyan()
+        );
 
+        // Create work channel and results channel
+        let (work_tx, work_rx) = mpsc::channel::<PathBuf>(100);
+        let (result_tx, mut result_rx) = mpsc::channel::<ProcessResult>(100);
+        let work_rx = Arc::new(Mutex::new(work_rx));
+
+        // Spawn worker tasks
+        let mut workers = Vec::new();
+        for _ in 0..cli.max_concurrent {
+            let work_rx = Arc::clone(&work_rx);
+            let s3_client = s3_client.clone();
+            let config = config.clone();
+            let stats = Arc::clone(&stats);
+            let base_path = cli.path.clone();
+            let result_tx = result_tx.clone();
+
+            workers.push(tokio::spawn(async move {
+                loop {
+                    let file_path = {
+                        let mut rx_guard = work_rx.lock().await;
+                        rx_guard.recv().await
+                    };
+
+                    match file_path {
+                        Some(path) => {
+                            let result = process_url_only_with_result(
+                                &s3_client, &config, &path, &base_path, &stats,
+                            )
+                            .await;
+
+                            if let Ok(r) = result {
+                                let _ = result_tx.send(r).await;
+                            }
+                        }
+                        None => break, // Channel closed
+                    }
+                }
+            }));
+        }
+        drop(result_tx); // Drop original sender
+
+        // Spawn result collector task
+        let collector_handle = tokio::spawn(async move {
+            let mut results = Vec::new();
+            while let Some(result) = result_rx.recv().await {
+                results.push(result);
+            }
+            results
+        });
+
+        // Producer: Send files to channel
         for file_path in files {
-            process_url_only(&s3_client, &config, &file_path, &mut stats).await?;
+            work_tx.send(file_path).await.unwrap();
+        }
+        drop(work_tx); // Close channel to signal workers to exit
+
+        // Wait for all workers to complete
+        for worker in workers {
+            if let Err(e) = worker.await {
+                eprintln!("{} Worker panic: {}", style("✗").red(), e);
+            }
+        }
+
+        // Collect and sort results
+        let mut results = collector_handle.await.unwrap();
+        results.sort_by(|a, b| {
+            let a_name = match a {
+                ProcessResult::UrlGenerated { filename, .. } => filename,
+                ProcessResult::NotFound { filename } => filename,
+                _ => "",
+            };
+            let b_name = match b {
+                ProcessResult::UrlGenerated { filename, .. } => filename,
+                ProcessResult::NotFound { filename } => filename,
+                _ => "",
+            };
+            a_name.cmp(b_name)
+        });
+
+        // Print results
+        println!();
+        for result in results {
+            match result {
+                ProcessResult::UrlGenerated { filename, url } => {
+                    println!("{} {}", style("✓").green(), style(&filename).green());
+                    println!("  {} {}", style("🔗").blue(), style(&url).dim());
+                }
+                ProcessResult::NotFound { filename } => {
+                    println!(
+                        "{} {} {}",
+                        style("⚠").yellow(),
+                        style(&filename).yellow(),
+                        style("(not found on S3)").dim()
+                    );
+                }
+                _ => {}
+            }
         }
 
         // Print summary
         println!();
-        println!(
-            "{}",
-            style(format!(
-                "Summary: {} URL(s) generated, {} not found",
-                stats.urls_generated, stats.not_found
-            ))
-            .bold()
-        );
+        stats.print_url_summary();
     } else {
-        // Upload mode
+        // Upload mode - concurrent uploads using mpsc
+        println!(
+            "{}",
+            style(format!(
+                "⚡ Uploading with {} workers...",
+                cli.max_concurrent
+            ))
+            .cyan()
+        );
+
+        // Create work channel and results channel
+        let (work_tx, work_rx) = mpsc::channel::<PathBuf>(100);
+        let (result_tx, mut result_rx) = mpsc::channel::<ProcessResult>(100);
+        let work_rx = Arc::new(Mutex::new(work_rx));
+
+        // Spawn worker tasks
+        let mut workers = Vec::new();
+        for _ in 0..cli.max_concurrent {
+            let work_rx = Arc::clone(&work_rx);
+            let s3_client = s3_client.clone();
+            let config = config.clone();
+            let stats = Arc::clone(&stats);
+            let multi = Arc::clone(&multi);
+            let base_path = cli.path.clone();
+            let result_tx = result_tx.clone();
+
+            workers.push(tokio::spawn(async move {
+                loop {
+                    let file_path = {
+                        let mut rx_guard = work_rx.lock().await;
+                        rx_guard.recv().await
+                    };
+
+                    match file_path {
+                        Some(path) => {
+                            let pb = multi.add(ProgressBar::new(0));
+                            pb.set_style(
+                                ProgressStyle::default_bar()
+                                    .template(
+                                        "{spinner:.green} [{bar:40.cyan/blue}] {bytes}/{total_bytes} {msg}",
+                                    )
+                                    .unwrap()
+                                    .progress_chars("#>-"),
+                            );
+
+                            let result = process_upload_with_result(
+                                &s3_client,
+                                &config,
+                                &path,
+                                &base_path,
+                                &pb,
+                                &stats,
+                            )
+                            .await;
+
+                            pb.finish_and_clear();
+
+                            // Send result to results channel
+                            if let Ok(r) = result {
+                                let _ = result_tx.send(r).await;
+                            }
+                        }
+                        None => break, // Channel closed
+                    }
+                }
+            }));
+        }
+        drop(result_tx); // Drop original sender
+
+        // Spawn result collector task
+        let collector_handle = tokio::spawn(async move {
+            let mut results = Vec::new();
+            while let Some(result) = result_rx.recv().await {
+                results.push(result);
+            }
+            results
+        });
+
+        // Producer: Send files to channel
         for file_path in files {
-            let pb = multi.add(ProgressBar::new(0));
-            pb.set_style(
-                ProgressStyle::default_bar()
-                    .template("{spinner:.green} [{bar:40.cyan/blue}] {bytes}/{total_bytes} {msg}")
-                    .unwrap()
-                    .progress_chars("#>-"),
-            );
+            work_tx.send(file_path).await.unwrap();
+        }
+        drop(work_tx); // Close channel to signal workers to exit
 
-            process_upload(&s3_client, &config, &file_path, &pb, &mut stats).await?;
+        // Wait for all workers to complete
+        for worker in workers {
+            if let Err(e) = worker.await {
+                eprintln!("{} Worker panic: {}", style("✗").red(), e);
+            }
+        }
 
-            pb.finish_and_clear();
+        // Collect and sort results
+        let mut results = collector_handle.await.unwrap();
+        results.sort_by(|a, b| {
+            let a_name = match a {
+                ProcessResult::Uploaded { filename, .. } => filename,
+                ProcessResult::Skipped { filename, .. } => filename,
+                ProcessResult::Failed { filename, .. } => filename,
+                _ => "",
+            };
+            let b_name = match b {
+                ProcessResult::Uploaded { filename, .. } => filename,
+                ProcessResult::Skipped { filename, .. } => filename,
+                ProcessResult::Failed { filename, .. } => filename,
+                _ => "",
+            };
+            a_name.cmp(b_name)
+        });
+
+        // Print results
+        println!();
+        for result in results {
+            match result {
+                ProcessResult::Uploaded {
+                    filename,
+                    size,
+                    url,
+                } => {
+                    println!(
+                        "{} {} ({})",
+                        style("✓").green(),
+                        style(&filename).green(),
+                        style(size).dim()
+                    );
+                    println!("  {} {}", style("🔗").blue(), style(&url).dim());
+                }
+                ProcessResult::Skipped {
+                    filename,
+                    size,
+                    url,
+                } => {
+                    println!(
+                        "{} {} ({})",
+                        style("↻").yellow(),
+                        style(&filename).dim(),
+                        style(format!("skipped - identical, {}", size)).dim()
+                    );
+                    println!("  {} {}", style("🔗").blue(), style(&url).dim());
+                }
+                ProcessResult::Failed { filename, error } => {
+                    println!(
+                        "{} {} - {}",
+                        style("✗").red(),
+                        style(&filename).red(),
+                        style(error).red()
+                    );
+                }
+                _ => {}
+            }
         }
 
         // Print summary
         println!();
-        println!(
-            "{}",
-            style(format!(
-                "Summary: {} uploaded, {} skipped, {} failed",
-                stats.uploaded, stats.skipped, stats.failed
-            ))
-            .bold()
-        );
+        stats.print_upload_summary();
     }
 
     Ok(())
@@ -214,16 +496,16 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-/// Process a file in upload mode
-async fn process_upload(
+/// Process a file in upload mode and return result (for clean output)
+async fn process_upload_with_result(
     s3_client: &S3Client,
     config: &Config,
     file_path: &Path,
+    base_path: &Path,
     pb: &ProgressBar,
-    stats: &mut Stats,
-) -> Result<()> {
-    let base_path = Cli::parse().path;
-    let relative_path = get_relative_path(&base_path, file_path)?;
+    stats: &Arc<Stats>,
+) -> Result<ProcessResult> {
+    let relative_path = get_relative_path(base_path, file_path)?;
     let s3_key = config.build_s3_key(&relative_path);
 
     // Get file size for display
@@ -237,20 +519,17 @@ async fn process_upload(
 
     match comparison {
         s3::FileComparison::Identical => {
-            // Skip upload
-            println!(
-                "{} {} ({})",
-                style("↻").yellow(),
-                style(&relative_path).dim(),
-                style(format!("skipped - identical, {}", size_str)).dim()
-            );
-
             // Generate pre-signed URL
             let url =
                 generate_presigned_url(s3_client.client(), s3_client.bucket(), &s3_key).await?;
-            println!("  {} {}", style("🔗").blue(), style(&url).dim());
 
-            stats.skipped += 1;
+            stats.skipped.fetch_add(1, Ordering::Relaxed);
+
+            Ok(ProcessResult::Skipped {
+                filename: relative_path,
+                size: size_str,
+                url,
+            })
         }
         s3::FileComparison::NotFound | s3::FileComparison::Different => {
             // Upload file
@@ -264,49 +543,54 @@ async fn process_upload(
             .await
             {
                 Ok(UploadResult::Uploaded) => {
-                    println!(
-                        "{} {} ({})",
-                        style("✓").green(),
-                        style(&relative_path).green(),
-                        style(size_str).dim()
-                    );
-
                     // Generate pre-signed URL
                     let url =
                         generate_presigned_url(s3_client.client(), s3_client.bucket(), &s3_key)
                             .await?;
-                    println!("  {} {}", style("🔗").blue(), style(&url).dim());
 
-                    stats.uploaded += 1;
+                    stats.uploaded.fetch_add(1, Ordering::Relaxed);
+
+                    Ok(ProcessResult::Uploaded {
+                        filename: relative_path,
+                        size: size_str,
+                        url,
+                    })
                 }
                 Ok(UploadResult::Skipped) => {
-                    stats.skipped += 1;
+                    stats.skipped.fetch_add(1, Ordering::Relaxed);
+
+                    let url =
+                        generate_presigned_url(s3_client.client(), s3_client.bucket(), &s3_key)
+                            .await?;
+
+                    Ok(ProcessResult::Skipped {
+                        filename: relative_path,
+                        size: size_str,
+                        url,
+                    })
                 }
                 Err(e) => {
-                    println!(
-                        "{} {} - {}",
-                        style("✗").red(),
-                        style(&relative_path).red(),
-                        style(e).red()
-                    );
-                    stats.failed += 1;
+                    stats.failed.fetch_add(1, Ordering::Relaxed);
+
+                    Ok(ProcessResult::Failed {
+                        filename: relative_path,
+                        error: format!("{:#}", e),
+                    })
                 }
             }
         }
     }
-
-    Ok(())
 }
 
-/// Process a file in URL-only mode
-async fn process_url_only(
+/// Process a file in URL-only mode and return result (for clean output)
+async fn process_url_only_with_result(
     s3_client: &S3Client,
     config: &Config,
     file_path: &Path,
-    stats: &mut Stats,
-) -> Result<()> {
-    let base_path = Cli::parse().path;
-    let relative_path = get_relative_path(&base_path, file_path)?;
+    base_path: &Path,
+    stats: &Arc<Stats>,
+) -> Result<ProcessResult> {
+    let relative_path = get_relative_path(base_path, file_path)?;
     let s3_key = config.build_s3_key(&relative_path);
 
     // Check if file exists on S3
@@ -324,23 +608,19 @@ async fn process_url_only(
             let url =
                 generate_presigned_url(s3_client.client(), s3_client.bucket(), &s3_key).await?;
 
-            println!("{} {}", style("✓").green(), style(&relative_path).green());
-            println!("  {} {}", style("🔗").blue(), style(&url).dim());
+            stats.urls_generated.fetch_add(1, Ordering::Relaxed);
 
-            stats.urls_generated += 1;
+            Ok(ProcessResult::UrlGenerated {
+                filename: relative_path,
+                url,
+            })
         }
         Err(_) => {
-            // File doesn't exist
-            println!(
-                "{} {} {}",
-                style("⚠").yellow(),
-                style(&relative_path).yellow(),
-                style("(not found on S3)").dim()
-            );
+            stats.not_found.fetch_add(1, Ordering::Relaxed);
 
-            stats.not_found += 1;
+            Ok(ProcessResult::NotFound {
+                filename: relative_path,
+            })
         }
     }
-
-    Ok(())
 }
