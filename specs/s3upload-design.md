@@ -36,11 +36,14 @@ S3_TARGET_PATH=uploads/  # optional prefix for all uploads
 # Upload single file
 s3upload ./test.mp4
 
-# Upload all files in current directory
+# Upload all mp4/mov files in current directory (default extensions)
 s3upload .
 
-# Upload directory
-s3upload ./videos
+# Upload directory with custom extensions
+s3upload ./videos -e mp4,mov,avi
+
+# Upload only PDFs
+s3upload ./documents --extensions pdf
 
 # Generate pre-signed URL only (no upload)
 s3upload ./test.mp4 --url-only
@@ -96,6 +99,10 @@ struct Cli {
     /// Only generate pre-signed URLs, don't upload
     #[arg(long)]
     url_only: bool,
+
+    /// Allowed file extensions (default: mp4,mov)
+    #[arg(long, short = 'e', default_value = "mp4,mov", value_delimiter = ',')]
+    extensions: Vec<String>,
 }
 ```
 

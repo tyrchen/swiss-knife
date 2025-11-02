@@ -66,6 +66,8 @@ Make sure you have valid AWS credentials configured.
 s3upload ./video.mp4
 ```
 
+By default, only `.mp4` and `.mov` files are processed. You can customize this with the `--extensions` flag.
+
 This will:
 1. Check if the file exists on S3
 2. Upload if it's new or different
@@ -95,7 +97,22 @@ Uploads all files in the `videos` directory, maintaining the directory structure
 s3upload .
 ```
 
-Uploads all files in the current directory and subdirectories.
+Uploads all `.mp4` and `.mov` files in the current directory and subdirectories.
+
+### Filter by File Extensions
+
+```bash
+# Upload only specific file types
+s3upload . --extensions mp4,mov,avi
+
+# Short form
+s3upload . -e mp4,avi
+
+# Upload all PDF files
+s3upload ./documents -e pdf
+```
+
+The extension filter is case-insensitive and works with or without the leading dot.
 
 ### Generate Pre-signed URLs Only
 
@@ -151,6 +168,13 @@ This approach is fast and works well for most use cases. Files are re-uploaded o
 - They don't exist on S3
 - Their size has changed
 
+## CLI Options
+
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--url-only` | | Generate pre-signed URLs without uploading | false |
+| `--extensions` | `-e` | Comma-separated list of allowed file extensions | `mp4,mov` |
+
 ## Examples
 
 ### Example 1: Upload video files for sharing
@@ -196,11 +220,11 @@ s3upload ./documents/report.pdf
 ### Example 3: Generate URLs for existing files
 
 ```bash
-# Upload files
-s3upload ./presentations/*.pdf
+# Upload PDF files (need to specify extension since default is mp4,mov)
+s3upload ./presentations -e pdf
 
 # Later, get fresh pre-signed URLs without re-uploading
-s3upload ./presentations/*.pdf --url-only
+s3upload ./presentations -e pdf --url-only
 
 # Output:
 # 🔗 Generating pre-signed URLs...
@@ -208,6 +232,16 @@ s3upload ./presentations/*.pdf --url-only
 #   🔗 https://...
 # ✓ slide2.pdf
 #   🔗 https://...
+```
+
+### Example 4: Upload multiple file types
+
+```bash
+# Upload both videos and images
+s3upload ./media -e mp4,mov,jpg,png,gif
+
+# Upload documents
+s3upload ./documents -e pdf,docx,xlsx
 ```
 
 ## S3 Key Structure

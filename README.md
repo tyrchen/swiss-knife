@@ -111,8 +111,11 @@ EOF
 # Upload a single file
 s3upload ./video.mp4
 
-# Upload entire directory
+# Upload entire directory (only mp4 and mov files by default)
 s3upload ./videos
+
+# Upload with custom file extensions
+s3upload . -e mp4,mov,avi
 
 # Generate pre-signed URLs only (no upload)
 s3upload ./video.mp4 --url-only

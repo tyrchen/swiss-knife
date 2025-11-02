@@ -24,6 +24,10 @@ struct Cli {
     /// Only generate pre-signed URLs, don't upload
     #[arg(long)]
     url_only: bool,
+
+    /// Allowed file extensions (comma-separated, e.g., "mp4,mov,avi")
+    #[arg(long, short = 'e', default_value = "mp4,mov", value_delimiter = ',')]
+    extensions: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -44,10 +48,17 @@ async fn main() -> Result<()> {
     let s3_client = S3Client::new(config.clone()).await?;
 
     // Collect files to process
-    let files = collect_files(&cli.path)?;
+    let files = collect_files(&cli.path, &cli.extensions)?;
 
     if files.is_empty() {
-        println!("{}", style("No files found to process").yellow());
+        println!(
+            "{}",
+            style(format!(
+                "No files found with extensions: {}",
+                cli.extensions.join(", ")
+            ))
+            .yellow()
+        );
         return Ok(());
     }
 
@@ -114,19 +125,37 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Collect all files to process from the given path
-fn collect_files(path: &Path) -> Result<Vec<PathBuf>> {
+/// Collect all files to process from the given path, filtered by extensions
+fn collect_files(path: &Path, allowed_extensions: &[String]) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
 
+    // Normalize extensions to lowercase for case-insensitive matching
+    let extensions: Vec<String> = allowed_extensions
+        .iter()
+        .map(|ext| ext.trim_start_matches('.').to_lowercase())
+        .collect();
+
     if path.is_file() {
-        files.push(path.to_path_buf());
+        // Check if single file matches allowed extensions
+        if let Some(ext) = path.extension() {
+            let file_ext = ext.to_string_lossy().to_lowercase();
+            if extensions.contains(&file_ext) {
+                files.push(path.to_path_buf());
+            }
+        }
     } else if path.is_dir() {
         for entry in WalkDir::new(path)
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file())
         {
-            files.push(entry.path().to_path_buf());
+            let entry_path = entry.path();
+            if let Some(ext) = entry_path.extension() {
+                let file_ext = ext.to_string_lossy().to_lowercase();
+                if extensions.contains(&file_ext) {
+                    files.push(entry_path.to_path_buf());
+                }
+            }
         }
     } else {
         anyhow::bail!("Path does not exist: {}", path.display());
