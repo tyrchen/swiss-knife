@@ -23,3 +23,13 @@ Build the tool using Rust with dotenv, clap, and aws sdk. Make UI pretty and use
 ## Improve code quality
 
 For s3upload tool, Review the code carefully and think ultra hard about how to improve the code quality, the features of the tool itself and the user experience. Write down your thoughts, design and implementation plan in ./specs/0006-s3upload-improvements.md.
+
+## pdf2jpg
+
+I need a tool to convert pdf to jpg:
+
+```bash
+pdf2jpg test.pdf -o ./out # convert the test.pdf file to a list of images named based on page. if -o is omitted, output to current directory
+```
+
+Build the tool using Rust with clap. Make UI pretty and user friendly (with progress bar, etc.). First generate a design and implementation plan at ./specs/, then implement the tool entirely.

@@ -33,6 +33,10 @@ path = "src/imgen.rs"
 name = "s3upload"
 path = "src/s3upload.rs"
 
+[[bin]]
+name = "pdf2jpg"
+path = "src/pdf2jpg.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = [
@@ -56,7 +60,7 @@ futures = "0.3"
 base64 = "0.22"
 dotenv = "0.15"
 aws-config = { version = "1.8", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.110"
+aws-sdk-s3 = "1.116"
 walkdir = "2.5"
 thiserror = "2.0"
 md-5 = "0.10"
