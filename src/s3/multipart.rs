@@ -6,9 +6,11 @@ use tokio::io::AsyncReadExt;
 use tracing::{debug, info};
 
 // Threshold for using multipart upload (100MB)
+// Only use multipart for files significantly larger than the part size
+// to ensure we have multiple meaningful parts
 pub const MULTIPART_THRESHOLD: u64 = 100 * 1024 * 1024;
 
-// Size of each part (10MB) - AWS minimum is 5MB
+// Size of each part (10MB) - AWS minimum is 5MB for all parts except the last
 const PART_SIZE: usize = 10 * 1024 * 1024;
 
 /// Upload a large file using S3 multipart upload
@@ -79,23 +81,40 @@ pub async fn upload_multipart(
 
     loop {
         let mut buffer = vec![0u8; PART_SIZE];
-        let bytes_read = file.read(&mut buffer).await?;
+        let mut total_read = 0;
 
-        if bytes_read == 0 {
-            break; // EOF
+        // Keep reading until we fill the buffer or hit EOF
+        // This is necessary because AsyncReadExt::read() doesn't guarantee filling the buffer
+        while total_read < PART_SIZE {
+            let bytes_read = file.read(&mut buffer[total_read..]).await?;
+
+            if bytes_read == 0 {
+                // EOF reached
+                break;
+            }
+
+            total_read += bytes_read;
         }
 
-        buffer.truncate(bytes_read);
+        if total_read == 0 {
+            // No data read at all, we're done
+            break;
+        }
+
+        // Truncate buffer to actual bytes read
+        buffer.truncate(total_read);
 
         debug!("Uploading part {} ({} bytes)", part_number, buffer.len());
 
-        // Upload this part
+        // Upload this part with explicit content length
+        let content_length = buffer.len() as i64;
         let part_result = client
             .upload_part()
             .bucket(bucket)
             .key(s3_key)
             .upload_id(upload_id)
             .part_number(part_number)
+            .content_length(content_length)
             .body(ByteStream::from(buffer))
             .send()
             .await
@@ -109,7 +128,7 @@ pub async fn upload_multipart(
 
         parts.push(completed_part);
 
-        uploaded_bytes += bytes_read as u64;
+        uploaded_bytes += total_read as u64;
         if let Some(pb) = pb {
             pb.set_position(uploaded_bytes);
         }
