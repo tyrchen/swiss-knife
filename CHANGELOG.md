@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 ---
+## [0.2.2](https://github.com/compare/v0.2.1..v0.2.2) - 2026-01-26
+
+### Miscellaneous Chores
+
+- bump dep version - ([03f178f](https://github.com/commit/03f178f2476e5aab2dbb738e5a4d225d1c0f0483)) - Tyr Chen
+
+### Other
+
+- Update CHANGELOG.md - ([6ec678b](https://github.com/commit/6ec678b73d2d8f4fe86093874819eb3c58b6e397)) - Tyr Chen
+
+---
 ## [0.2.1] - 2025-12-07
 
 ### Features
