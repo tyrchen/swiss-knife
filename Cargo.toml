@@ -1,6 +1,6 @@
 [package]
 name = "swiss-knife"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 authors = ["Tyr Chen <tyr.chen@gmail.com>"]
 homepage = "https://github.com/tyrchen/swiss-knife"
@@ -39,12 +39,7 @@ path = "src/pdf2jpg.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", default-features = false, features = [
-  "rustls-tls",
-  "multipart",
-  "stream",
-  "json",
-] }
+reqwest = { version = "0.13", features = ["multipart", "stream", "json"] }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -52,15 +47,18 @@ clap = { version = "4", features = ["derive"] }
 rayon = "1.11"
 indicatif = "0.18"
 console = "0.16"
-blake3 = "1.8.2"
+blake3 = "1.8.3"
 serde_yaml = "0.9"
 slug = "0.1"
 tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 base64 = "0.22"
 dotenv = "0.15"
-aws-config = { version = "1.8", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.116"
+aws-config = { version = "1.8", features = [
+  "behavior-version-latest",
+  "credentials-login",
+] }
+aws-sdk-s3 = "1.120"
 walkdir = "2.5"
 thiserror = "2.0"
 md-5 = "0.10"
@@ -68,7 +66,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
-tempfile = "3.23"
+tempfile = "3.24"
 
 [profile.release]
 opt-level = "z"   # Optimize for size
